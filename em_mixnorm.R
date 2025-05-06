@@ -1,28 +1,46 @@
-em_mixnorm <- function(data, max.iter = 1000, tol = 1e-6) {
-  n <- length(data)
-  pi <- 0.5
-  mu <- quantile(data, c(0.25, 0.75))
-  sigma <- rep(sd(data), 2)
+#' Fit EM Algorithm for Mixture of Two Normals
+#'
+#' @param X A numeric vector of data points.
+#' @param maxit Maximum number of iterations.
+#' @param tolerance Convergence tolerance for log-likelihood.
+#' @return A list with estimated parameters.
+#' @export
+em_mixnorm <- function(X, maxit = 1000, tolerance = 1e-6) {
+  n <- length(X)
+  PiOld <- 0.5
+  clusterguess <- rbinom(n, 1, PiOld)
   
-  loglik <- function() sum(log(dmix(data, pi, mu, sigma)))
-  prev_ll <- loglik()
+  mu1 <- mean(X[clusterguess == 1])
+  sd1 <- sd(X[clusterguess == 1])
+  mu2 <- mean(X[clusterguess != 1])
+  sd2 <- sd(X[clusterguess != 1])
+  Pi <- mean(clusterguess)
   
-  for (i in 1:max.iter) {
-    # E-step
-    gamma <- pi * dnorm(data, mu[1], sigma[1]) /
-      (pi * dnorm(data, mu[1], sigma[1]) + (1 - pi) * dnorm(data, mu[2], sigma[2]))
-    
-    # M-step
-    pi <- mean(gamma)
-    mu[1] <- sum(gamma * data) / sum(gamma)
-    mu[2] <- sum((1 - gamma) * data) / sum(1 - gamma)
-    sigma[1] <- sqrt(sum(gamma * (data - mu[1])^2) / sum(gamma))
-    sigma[2] <- sqrt(sum((1 - gamma) * (data - mu[2])^2) / sum(1 - gamma))
-    
-    curr_ll <- loglik()
-    if (abs(curr_ll - prev_ll) < tol) break
-    prev_ll <- curr_ll
+  loglik <- function(X, mu1, sd1, mu2, sd2, Pi, clust) {
+    -log(sd1)*sum(clust) -
+      sum((X[clust == 1] - mu1)^2)/(2*sd1^2) -
+      log(sd2)*sum(!clust) -
+      sum((X[clust == 0] - mu2)^2)/(2*sd2^2) +
+      log(Pi)*sum(clust) + log(1 - Pi)*sum(!clust)
   }
   
-  list(pi = pi, mu = mu, sigma = sigma, loglik = curr_ll, iter = i)
+  oldloglik <- loglik(X, mu1, sd1, mu2, sd2, Pi, clusterguess)
+  
+  for (i in 1:maxit) {
+    l1 <- -log(sd1) - (X - mu1)^2 / (2 * sd1^2) + log(Pi)
+    l2 <- -log(sd2) - (X - mu2)^2 / (2 * sd2^2) + log(1 - Pi)
+    clusterguess <- l1 > l2
+    
+    mu1 <- mean(X[clusterguess == 1])
+    sd1 <- sd(X[clusterguess == 1])
+    mu2 <- mean(X[clusterguess != 1])
+    sd2 <- sd(X[clusterguess != 1])
+    Pi <- mean(clusterguess)
+    
+    newloglik <- loglik(X, mu1, sd1, mu2, sd2, Pi, clusterguess)
+    if (abs(newloglik - oldloglik) < tolerance) break
+    oldloglik <- newloglik
+  }
+  
+  return(list(mu1 = mu1, sd1 = sd1, mu2 = mu2, sd2 = sd2, Pi = Pi, clusters = clusterguess))
 }
